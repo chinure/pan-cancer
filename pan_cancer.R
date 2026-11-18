@@ -1,8 +1,44 @@
 
-rm(list = ls())
-setwd("D:/000Researching/020Yao's Research/pan-cancer/Cuprotosis/Data")
-dir <- "D:/000Researching/020Yao's Research/pan-cancer/Cuprotosis/"
-getwd()
+# Archived exploratory analysis; see README for required precomputed workbooks.
+# Usage: Rscript pan_cancer.R [WORK_DIR [OUTPUT_DIR [HPA_DIR]]] [--check-inputs]
+args <- commandArgs(trailingOnly = TRUE)
+if ("--help" %in% args) {
+  cat("Usage: Rscript pan_cancer.R [WORK_DIR [OUTPUT_DIR [HPA_DIR]]] [--check-inputs]\n",
+      "Environment: PANCANCER_WORK_DIR, PANCANCER_OUTPUT_DIR, PANCANCER_HPA_DIR\n",
+      "Use a working COPY of input workbooks: the legacy script writes tables there.\n")
+  quit(status = 0)
+}
+check_inputs_only <- "--check-inputs" %in% args
+args <- args[args != "--check-inputs"]
+if (length(args) > 3L) stop("At most three path arguments are supported; use --help.")
+work_dir <- if (length(args) >= 1L) args[[1L]] else
+  Sys.getenv("PANCANCER_WORK_DIR", unset = file.path(getwd(), "data"))
+output_dir <- if (length(args) >= 2L) args[[2L]] else
+  Sys.getenv("PANCANCER_OUTPUT_DIR", unset = file.path(getwd(), "results"))
+hpa_dir <- if (length(args) >= 3L) args[[3L]] else
+  Sys.getenv("PANCANCER_HPA_DIR", unset = file.path(work_dir, "HPA"))
+work_dir <- normalizePath(work_dir, mustWork = FALSE)
+output_dir <- normalizePath(output_dir, mustWork = FALSE)
+hpa_dir <- normalizePath(hpa_dir, mustWork = FALSE)
+required_workbooks <- c("diff.xlsx", "diff_T_N.xlsx", "exp.xlsx", "TMB.xlsx",
+  "MSI.xlsx", "NEO.xlsx", "prog.xlsx", "Stage.xlsx", "Estimate.xlsx", "xCell.xlsx",
+  "GDC-PANCAN.mutect2_snv.tsv", "DTP_NCI60_ZSCORE.xlsx",
+  "RNA__RNA_seq_composite_expression.xls")
+required_inputs <- c(file.path(work_dir, required_workbooks), file.path(hpa_dir,
+  c("rna_tissue_fantom.tsv", "rna_tissue_hpa.tsv", "rna_tissue_gtex.tsv")))
+missing_inputs <- required_inputs[!file.exists(required_inputs)]
+if (length(missing_inputs)) {
+  stop(paste("Required inputs are missing (see README):",
+             paste(missing_inputs, collapse = "\n"), sep = "\n"), call. = FALSE)
+}
+if (check_inputs_only) {
+  cat("Required input paths exist; workbook schemas and dependencies are not validated.\n")
+  quit(status = 0)
+}
+if (!dir.exists(work_dir)) stop("WORK_DIR is not a directory.", call. = FALSE)
+dir.create(file.path(output_dir, "Graph"), recursive = TRUE, showWarnings = FALSE)
+setwd(work_dir)
+dir <- paste0(output_dir, "/")
 
 # Load library ------------------------------------------------------------
 
@@ -12,7 +48,7 @@ getwd()
 # BiocManager::install("GenVisR")
 # install.packages("forestploter")
 # BiocManager::install("impute")
-library(GenVisR) 
+library(GenVisR)
 set.seed(383)
 library(BiocManager)
 library(rJava)
@@ -40,9 +76,9 @@ library(RColorBrewer)
 
 # Expression in normal tissue ---------------------------------------------
 gene <- c("FDX1", "LIAS", "LIPT1", "DLAT", "DLD", "PDHA1", "PDHB", "SLC31A1")
-Fdat <- read.table("../../HPA/rna_tissue_fantom.tsv", header = T, sep = "\t")
+Fdat <- read.table(file.path(hpa_dir, "rna_tissue_fantom.tsv"), header = T, sep = "\t")
 fdat <- Fdat[Fdat$Gene.name %in% gene,]
-writexl::write_xlsx(fdat, "../../HPA/gene_fantom.xlsx")
+writexl::write_xlsx(fdat, file.path(output_dir, "gene_fantom.xlsx"))
 unique(Fdat$Tissue)
 p <- ggplot(fdat, aes(x=Tissue, y = Scaled.tags.per.million, fill= Gene.name))+
   geom_bar(stat = "identity",position = "dodge")+
@@ -51,13 +87,13 @@ p <- ggplot(fdat, aes(x=Tissue, y = Scaled.tags.per.million, fill= Gene.name))+
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
   ylab("Expression(Scaled tags per million)"); p
 ggsave(filename =paste0(dir, "Graph/","Fantom","_normal.svg"), plot = p,width = 11, height = 5.5)
-Hdat <- read.table("../../HPA/rna_tissue_hpa.tsv", header = T, sep = "\t")
+Hdat <- read.table(file.path(hpa_dir, "rna_tissue_hpa.tsv"), header = T, sep = "\t")
 hdat <- Hdat[Hdat$Gene.name %in% gene, ]
-unique(hdat$Tissue) 
+unique(hdat$Tissue)
 tis <- unique(hdat[hdat$Tissue %in% unique(Fdat$Tissue), ]$Tissue)
 tis <- c(tis, "bone marrow")
 hdat <- hdat[hdat$Tissue %in% tis,]
-writexl::write_xlsx(hdat, "../../HPA/gene_hpa.xlsx")
+writexl::write_xlsx(hdat, file.path(output_dir, "gene_hpa.xlsx"))
 p <- ggplot(hdat, aes(x=Tissue, y = TPM, fill= Gene.name))+
   geom_bar(stat = "identity",position = "dodge")+
   scale_fill_lancet(alpha = 0.5)+
@@ -65,10 +101,10 @@ p <- ggplot(hdat, aes(x=Tissue, y = TPM, fill= Gene.name))+
   theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))+
   ylab("Expression(mean of transcription per million)"); p
 ggsave(filename =paste0(dir, "Graph/","HPA","_normal.svg"), plot = p,width = 10, height = 5.5)
-Gdat <- read.table("../../HPA/rna_tissue_gtex.tsv", header = T, sep = "\t")
+Gdat <- read.table(file.path(hpa_dir, "rna_tissue_gtex.tsv"), header = T, sep = "\t")
 gdat <- Gdat[Gdat$Gene.name %in% gene, ]
 unique(gdat$Tissue)
-writexl::write_xlsx(gdat, "../../HPA/gene_GTEx.xlsx")
+writexl::write_xlsx(gdat, file.path(output_dir, "gene_GTEx.xlsx"))
 p <- ggplot(gdat, aes(x=Tissue, y = nTPM, fill= Gene.name))+
   geom_bar(stat = "identity",position = "dodge")+
   scale_fill_lancet(alpha = 0.5)+
@@ -102,18 +138,17 @@ for (i in 4:11) {
     scale_color_manual(values = col)+
     stat_compare_means(aes(group = Group),method="wilcox.test",hide.ns = T,
                        label="p.signif",vjust = 0.8)
-  ggsave(filename =paste0(dir, "Graph/",colnames(diff1)[i],"_diff.svg"), plot = p,width = 13, height = 4) 
+  ggsave(filename =paste0(dir, "Graph/",colnames(diff1)[i],"_diff.svg"), plot = p,width = 13, height = 4)
 }
-diff_p <- data.frame(1:34)
-row.names(diff_p) <- t$Sample
+sample_order <- unique(as.character(diff1$Sample))
+diff_p <- data.frame(row.names = sample_order)
 for (i in 4:11) {
   form <- as.formula(paste0(colnames(diff1)[i], "~Group"))
-  t <- compare_means(form, data = diff1, group.by = "Sample",method = "wilcox.test", 
-                     paired = F) 
-  diff_p <- cbind(diff_p, t$p.signif)
-  colnames(diff_p)[i-2] <- colnames(diff1)[i]
+  comparison <- ggpubr::compare_means(form, data = diff1, group.by = "Sample",
+                                    method = "wilcox.test", paired = FALSE)
+  diff_p[[colnames(diff1)[i]]] <- comparison$p.signif[
+    match(sample_order, as.character(comparison$Sample))]
 }
-diff_p <- diff_p[,-1]
 diff_p <- diff_p[order(row.names(diff_p)), ]
 
 diff1 <- diff1[,-1]
@@ -128,14 +163,14 @@ diff2[,c(1:34)] <- lapply(diff2[,c(1:34)], as.numeric)
 diff2 <- as.matrix(diff2)
 for (i in seq(2,68,2)) {
   a <- diff2[i, ]-diff2[i-1, ]
-  
-  
+
+
 }
 diff1$Sample <- as.factor(diff1$Sample)
 diff1$Group <- as.factor(diff$Group)
 diff2 <- diff1 %>% group_by(Sample, Group) %>% summarise(FDX1=mean(FDX1), LIAS=mean(LIAS), LIPT1=mean(LIPT1), DLD=mean(DLD),
                                                     DLAT=mean(DLAT), PDHA1=mean(PDHA1), PDHB = mean(PDHB), SLC31A1=mean(SLC31A1))
-sum <- diff2  
+sum <- diff2
 
 
 p <- ggplot(diff1, aes(x=Sample, y=FDX1, color = Group))+
@@ -178,17 +213,16 @@ res <- readxl::read_xlsx("exp_merge.xlsx")[,-1]
 
 sam <- unique(res$Sample)
 diff_exp <- data.frame()
-logFC <- data.frame(1:8)
-row.names(logFC) <- row.names(out)
-avgexp <- data.frame(1:8)
-row.names(avgexp) <- row.names(out)
+expression_genes <- setdiff(colnames(res), c("SampleName", "Sample", "Group"))
+logFC <- data.frame(row.names = expression_genes)
+avgexp <- data.frame(row.names = expression_genes)
 for (i in 1:length(sam)) {
   res2 <- filter(res, Sample ==sam[i])
   res3 <- res2[,-c(2,3)]
   res3 <- as.data.frame(t(res3))
   colnames(res3) <- res3[1,]
   res3 <- res3[-1,]
-  res3[,c(1:ncol(res3)) ] <- lapply(res1[,c(1:ncol(res3)) ], as.numeric)
+  res3[,c(1:ncol(res3)) ] <- lapply(res3[,c(1:ncol(res3)) ], as.numeric)
   list <- factor(res2$Group)
   head(list)
   list <- model.matrix(~factor(list)+0)
@@ -196,25 +230,21 @@ for (i in 1:length(sam)) {
   fit <- lmFit(res3, list)
   contr <- makeContrasts(Normal-Tumor, levels = list)
   fit1 <- contrasts.fit(fit, contr)
-  fit1 <- eBayes(fit)
+  fit1 <- eBayes(fit1)
   out <- topTable(fit1, n=Inf, coef = 1)
-  logFC <- cbind(logFC, out$logFC)
-  colnames(logFC)[i+1] <- sam[i]
-  avgexp <- cbind(avgexp, out$AveExpr)
-  colnames(avgexp)[i+1] <- sam[i]
-  out$Sample <- rep(sam[i], 8)
+  # topTable sorts by significance; align genes before combining cancer types.
+  logFC[[sam[i]]] <- out$logFC[match(expression_genes, rownames(out))]
+  avgexp[[sam[i]]] <- out$AveExpr[match(expression_genes, rownames(out))]
+  out$Gene <- rownames(out)
+  out$Sample <- rep(sam[i], nrow(out))
   diff_exp <- rbind(diff_exp,out)
 }
-
-diff_exp$Gene <- row.names(diff_exp)
 write.xlsx(diff_exp, "diff_exp.xlsx", sheetName = "diff_exp")
 write.xlsx(logFC, "diff_exp.xlsx", sheetName = "logFC",append = T)
 write.xlsx(avgexp, "diff_exp.xlsx", sheetName = "avgExp",append = T)
 
-logFC <- logFC[,-1]
 logMA <- as.matrix(logFC)
-avgExp <- avgexp[,-1]
-avgExp <- as.matrix(avgExp)
+avgExp <- as.matrix(avgexp)
 
 diff_p <- diff_p[, -c(1,10)]
 diff_p1 <- as.data.frame(t(diff_p))
@@ -253,6 +283,14 @@ readx <- function(x){
   }
   return(dat)
 }
+corda <- function(x){
+  cordat <- x[, -1]
+  cordat <- separate(cordat, Sample, into = c("Sample", "name"), sep = "[(]")
+  cordat <- cordat[,-2]
+  cordat <- cordat[!cordat$Sample %in% c("SARC", "MESO", "DLBC", "UVM"), , drop = FALSE]
+  return(cordat)
+}
+
 tmb <- readx("TMB")
 writexl::write_xlsx(tmb, "TMB_merge.xlsx")
 cordat <- corda(tmb)
@@ -297,7 +335,7 @@ redar <- function(x){
                base.size = 14, axis.label.size = 4, grid.label.size = 6, axis.label.offset = 1.07,
                background.circle.transparency = 0.2,group.point.size = 3, group.colours = "#337AB7", plot.title = x)+
     theme(plot.title = element_text(hjust = 0.5,size = 16))
-  
+
   ggsave(p, filename =paste0(dir, "Graph/TMB_redarplot_", x,".svg"), width = 10, height = 10)
 }
 sapply(colnames(cordat)[3:10], redar)
@@ -325,14 +363,7 @@ merge_cor <- as.data.frame(MSI_merge_cor)
 write.xlsx(merge_cor, "MSI_merge_cor.xlsx")
 
 
-NEO <- readx("NEO")  
-corda <- function(x){
-  cordat <- x[, -1]
-  cordat <- separate(cordat, Sample, into = c("Sample", "name"), sep = "[(]")
-  cordat <- cordat[,-2]
-  cordat <- cordat[-which(cordat$Sample %in% c("SARC","MESO","DLBC","UVM")),]
-  return(cordat)
-}
+NEO <- readx("NEO")
 cordat <- corda(NEO)
 A <- unique(cordat$Sample)
 writexl::write_xlsx(NEO, "NEO_merge.xlsx")
@@ -427,7 +458,7 @@ p1<-ggboxplot(stage1,
               bxp.errorbar.width = 1,
               width = 0.4,
               size=0.5,
-              font.label = list(size=30), 
+              font.label = list(size=30),
               palette = "Set1")+theme(panel.background =element_blank())+
   theme(legend.position = "right")+
   stat_compare_means(method="wilcox.test",hide.ns = F,
@@ -486,21 +517,18 @@ p <- ggplot(est1, aes(Sample,Gene,fill=R,size =p.adj)) +  #划线
 ggsave(filename =paste0(dir, "Graph/EstimatePlot",".svg"), plot = p,width = 11, height = 8)
 
 
-seq <- seq(4,268,4)
-seq1 <- seq+1
-seq2 <- seq(1,265,4)
-name <- c()
-for (i in seq2) {
-  n <- unlist(strsplit(colnames(xcr),split = "[....]"))[i]
-  name <- c(name,n)}
-name <- c("Sample",name)
+score_columns <- seq(4, 268, 4)
+pvalue_columns <- score_columns + 1
 xcR <- function(x){
   xCell <- readxl::read_xlsx("xCell.xlsx", sheet = x)
   xCell <- xCell[-1,]
-  xcr <- xCell[,c(1,seq)]
-  xcp <- xCell[,c(1,seq1)]
-  colnames(xcr) <- name
-  colnames(xcp) <- name
+  xcr <- xCell[,c(1,score_columns)]
+  xcp <- xCell[,c(1,pvalue_columns)]
+  # readxl adds ...N suffixes when repairing duplicated worksheet headers.
+  cell_names <- sub("\\.\\.\\.[0-9]+$", "", colnames(xcr))
+  cell_names[[1L]] <- "Sample"
+  colnames(xcr) <- cell_names
+  colnames(xcp) <- cell_names
   xcr$Index <- rep("R",nrow(xcr))
   xcp$Index <- rep("pvalue", nrow(xcp))
   xc <- rbind(xcr,xcp) %>% return()
@@ -562,8 +590,8 @@ unique(sm1$variant_class)
 A <- unique(stage$Sample)
 for (i in 1:37) {
   dat <- stage[which(stage$Sample == A[i]), ]
-  t <- compare_means(SLC31A1~Stage, data = dat, method = "wilcox.test", 
-                     paired = F) 
+  t <- compare_means(SLC31A1~Stage, data = dat, method = "wilcox.test",
+                     paired = F)
   print(t$p.signif)
 }
 
@@ -588,7 +616,7 @@ drug <- as.matrix(drug)
 row.names(drug) <- drug[,1]
 drugm <- drug[,-(1:5)]
 dimnames <- list(rownames(drug), colnames(drugm))
-data <- matrix(as.numeric(as.matrix(drugm)), nrow = nrow(drugm), dimnames = dimnames) 
+data <- matrix(as.numeric(as.matrix(drugm)), nrow = nrow(drugm), dimnames = dimnames)
 data_1 <- impute.knn(data)
 drug <- data_1$data
 drug <- avereps(drug)
@@ -609,64 +637,64 @@ for (i in rownames(exp)) {
     if (pvalue<0.05&cor>0.4) {
       outVector <- cbind(i,j,cor,pvalue)
       outTab <- rbind(outTab, outVector)
-      
+
     }
   }
 }
 outTab <- outTab[order(as.numeric(as.vector(outTab$pvalue))), ]
 write.xlsx(outTab, "drug_gene_correlation_R0.4.xlsx", row.names = F)
 outTab <- outTab[outTab$cor>0.44,]
-corPlotNum <- 8 
+corPlotNum <- 8
 plotList1 <- list()
 for(i in 1:corPlotNum){
-  Gene <- outTab[i, 1] 
-  Drug <- outTab[i, 2] 
-  x <- as.numeric(exp[Gene,]) 
-  y <- as.numeric(drug[Drug,]) 
-  cor <- sprintf("%.03f", as.numeric(outTab[i, 3])) 
-  pvalue= 0 
-  if(as.numeric(outTab[i, 4])< 0.001){ 
-    pvalue= "p<0.001" 
-  }else{ 
+  Gene <- outTab[i, 1]
+  Drug <- outTab[i, 2]
+  x <- as.numeric(exp[Gene,])
+  y <- as.numeric(drug[Drug,])
+  cor <- sprintf("%.03f", as.numeric(outTab[i, 3]))
+  pvalue= 0
+  if(as.numeric(outTab[i, 4])< 0.001){
+    pvalue= "p<0.001"
+  }else{
     pvalue=paste0( "p=",sprintf( "%.03f", as.numeric(outTab[i, 4])))
-  } 
-  df1 <- as.data.frame(cbind(x,y)) 
-  p1=ggplot(data= df1, aes(x = x, y = y))+ 
-    geom_point(size= 1.5, color="#ff4a12")+ 
-    stat_smooth(method= "lm",se=FALSE, formula=y~x, color = "#0a008a",size=1.3)+ 
+  }
+  df1 <- as.data.frame(cbind(x,y))
+  p1=ggplot(data= df1, aes(x = x, y = y))+
+    geom_point(size= 1.5, color="#ff4a12")+
+    stat_smooth(method= "lm",se=FALSE, formula=y~x, color = "#0a008a",size=1.3)+
     labs(x= "Expression",y= "IC50",title = paste0(Gene, ", ",Drug),
-         subtitle = paste0( "Cor=",cor, ", ",pvalue))+ 
-    theme(axis.ticks = element_blank, 
+         subtitle = paste0( "Cor=",cor, ", ",pvalue))+
+    theme(axis.ticks = element_blank,
           axis.text.y = element_blank,
-          axis.text.x = element_blank)+ 
+          axis.text.x = element_blank)+
     theme_bw()
   plotList1[[i]]=p1
 }
 
-plotList2 <- list() 
-corPlotNum<- 8 
-for(i in 1:corPlotNum){ 
-  Gene <- outTab[i, 1] 
-  Drug <- outTab[i, 2] 
-  x <- as.numeric(exp[Gene,]) 
-  y <- as.numeric(drug[Drug,]) 
-  df1 <- as.data.frame(cbind(x,y)) 
-  colnames(df1)[ 2] <- "IC50" 
-  df1$group <- ifelse(df1$x > median(df1$x), "high", "low") 
-  compaired <- list(c( "low", "high")) 
-  p1 <- ggboxplot(df1, x = "group", y = "IC50", fill = "group", 
-                  palette = c("#FC270F","#522F8C"), add = "jitter", 
-                  size = 0.5, xlab = paste0( "expression of ", Gene), 
-                  ylab = paste0( "IC50 of ", Drug),width = 0.5) + 
+plotList2 <- list()
+corPlotNum<- 8
+for(i in 1:corPlotNum){
+  Gene <- outTab[i, 1]
+  Drug <- outTab[i, 2]
+  x <- as.numeric(exp[Gene,])
+  y <- as.numeric(drug[Drug,])
+  df1 <- as.data.frame(cbind(x,y))
+  colnames(df1)[ 2] <- "IC50"
+  df1$group <- ifelse(df1$x > median(df1$x), "high", "low")
+  compaired <- list(c( "low", "high"))
+  p1 <- ggboxplot(df1, x = "group", y = "IC50", fill = "group",
+                  palette = c("#FC270F","#522F8C"), add = "jitter",
+                  size = 0.5, xlab = paste0( "expression of ", Gene),
+                  ylab = paste0( "IC50 of ", Drug),width = 0.5) +
     stat_compare_means(comparisons = compaired, method = "wilcox.test",
-                       symnum.args= list(cutpoints = c( 0, 0.001, 0.01, 0.05, 1), 
-                                         symbols = c( "***", "**", "*", "ns"))) 
-  plotList2[[i]]=p1 
+                       symnum.args= list(cutpoints = c( 0, 0.001, 0.01, 0.05, 1),
+                                         symbols = c( "***", "**", "*", "ns")))
+  plotList2[[i]]=p1
 }
 p <- ggarrange(plotlist= plotList1,nrow=2,ncol=4)
 ggsave(filename =paste0(dir, "Graph/drugCorPlot",".svg"), plot = p, width = 8, height = 4)
 p <- ggarrange(plotlist= plotList2,nrow=2,ncol=4)
-ggsave(filename =paste0(dir, "Graph/drugPlot",".svg"), plot = p, width = 8.5, height = 8) 
+ggsave(filename =paste0(dir, "Graph/drugPlot",".svg"), plot = p, width = 8.5, height = 8)
 
 # clin <- read.csv("Survival_SupplementalTable_S1_20171025_xena_sp.csv", header = T, sep = "\t")
 # clin <- clin[clin$cancer.type.abbreviation == "KIRC", ]
@@ -684,7 +712,7 @@ ggsave(filename =paste0(dir, "Graph/drugPlot",".svg"), plot = p, width = 8.5, he
 # library(survminer)
 # os$OS <- as.numeric(os$OS)
 # sfit <- coxph(Surv(OS.time,OS)~LIPT1, data = os)
-# 
+#
 # summary(sfit)
 # sfit <- coxph(Surv(OS.time,OS)~LIAS+FDX1, data = os)
 # pre <- predict(sfit, type = "lp")
@@ -700,7 +728,7 @@ ggsave(filename =paste0(dir, "Graph/drugPlot",".svg"), plot = p, width = 8.5, he
 # sfit <- coxph(Surv(OS.time,OS)~., data = int2)
 # summary(sfit)
 # sfit <- survfit(Surv(OS.time,OS)~group, data = os)
-# os$group <- ifelse(os$pre > median(os$pre), "high", "low") 
+# os$group <- ifelse(os$pre > median(os$pre), "high", "low")
 # ggsurvplot(sfit, conf.int=F, pval=TRUE)
 # ggsurvplot(sfit,
 #            # xlim=c(0,1100),
